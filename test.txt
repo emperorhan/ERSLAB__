@@ -1,0 +1,15 @@
+Number of disk : 23, Storage limit :  11TB  385GB  0.000MB
+base chunk video cap is  10TB  999GB  1000.000MB
+Current Capacity :  11TB  384GB  999.400MB
+Disk allocated segment total cap is  11TB  384GB  999.400MB
+Maximum Disk  73	ERS Disk  23
+
+TSA ALL QoE 		4.555303
+ERS QoE 		4.189399
+91.967523%
+
+TSA ALL Power 445.370021W	ERS Power 203.282179W
+45.643436%
+
+38
+수행시간 : 56
