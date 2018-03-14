@@ -388,19 +388,21 @@ string GetKey(int video, int seg){
 
 double GetDPvalue(int diskNum, int bth, int reqSeg, int curVer){
     if(bth > LENGTH * 10000) return INF;
-    if(reqSeg == diskRequestSegment[diskNum].size()) return 0;
+    int video = diskRequestSegment[diskNum][reqSeg].first;
+    int seg = diskRequestSegment[diskNum][reqSeg].second.first;
+    if(reqSeg == diskRequestSegment[diskNum].size() - 1) return ssim[curVer][videoSegmentIdx[video][seg]];
     double& ret = dp[bth][reqSeg][curVer];
     bool& isVisited = visited[bth][reqSeg][curVer];
     if(isVisited) return ret;
     isVisited = true;
-    int video = diskRequestSegment[diskNum][reqSeg].first;
-    int seg = diskRequestSegment[diskNum][reqSeg].second.first;
-    int reqVer = diskRequestSegment[diskNum][reqSeg].second.second.first;
+    int nextVideo = diskRequestSegment[diskNum][reqSeg + 1].first;
+    int nextSeg = diskRequestSegment[diskNum][reqSeg + 1].second.first;
+    int reqVer = diskRequestSegment[diskNum][reqSeg + 1].second.second.first;
     ret = ssim[curVer][videoSegmentIdx[video][seg]];
     double maxValue = 0;
-    for(auto ver : hotStoredVersion[video][seg]){
+    for(auto ver : hotStoredVersion[nextVideo][nextSeg]){
         if(reqVer <= ver){
-            int nextBandwidth = bth + (int)(GetServiceTime(video, seg, ver) * 10000);
+            int nextBandwidth = bth + (int)(GetServiceTime(nextVideo, nextSeg, ver) * 10000);
             double value = GetDPvalue(diskNum, nextBandwidth, reqSeg + 1, ver);
             if(maxValue < value){
                 maxValue = value;
