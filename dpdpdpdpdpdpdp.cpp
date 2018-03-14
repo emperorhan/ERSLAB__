@@ -457,7 +457,7 @@ void bandwidth_allocation(int sec, int client){
         HserviceNum++;
     }
 
-    isfinished.assign(service.size(), 0);
+    isfinished.assign(Hservice.size(), 0);
     sort(valuableService.begin(), valuableService.end());
     int finishedCount = 0;
 
@@ -467,7 +467,7 @@ void bandwidth_allocation(int sec, int client){
         int video           = valServ.second.second.first;
         int seg             = valServ.second.second.second.first;
         int selectedVersion = valServ.second.second.second.second;
-        int prevVersion     = Hservice[serviceNum].second.second.second.first;
+        int prevVersion     = Hservice[HserviceNum].second.second.second.first;
 
         if(isfinished[HserviceNum]) continue;
 
@@ -557,8 +557,8 @@ void bandwidth_allocation(int sec, int client){
         }
     }
 
-    ErsRequestServiceTime       = 0;
-    HRequestServiceTime         = 0;
+    HRequestServiceTime       = 0;
+    DPRequestServiceTime         = 0;
     OriginalRequestServiceTime  = 0;
     // printf("client: %d service start\n", client);
     for(auto sv : Hservice){
@@ -569,20 +569,15 @@ void bandwidth_allocation(int sec, int client){
         int selectedVersion     = sv.second.second.second.first;
 
         HQoE      += ssim[selectedVersion][videoSegmentIdx[video][seg]];
-        OriginalQoE += ssim[ver][videoSegmentIdx[video][seg]];
 
         if(seek){
-            HPower        += (SEEK_TIME * SEEK_POWER);
-            OriginalPower   += (SEEK_TIME * SEEK_POWER);
-            HRequestServiceTime       += SEEK_TIME;
-            OriginalRequestServiceTime  += SEEK_TIME;
+            HPower                  += (SEEK_TIME * SEEK_POWER);
+            HRequestServiceTime     += SEEK_TIME;
         }
 
         HPower        += ((GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME) * ACTIVE_POWER);
-        OriginalPower   += ((GetChunkCapacity(video, seg, ver) / TRANSFER_TIME) * ACTIVE_POWER);
 
         HRequestServiceTime       += (GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME);
-        OriginalRequestServiceTime  += (GetChunkCapacity(video, seg, ver) / TRANSFER_TIME);
     }
     HserviceCount += Hservice.size();
 
@@ -594,14 +589,19 @@ void bandwidth_allocation(int sec, int client){
         int selectedVersion     = sv.second.second.second.first;
         // printf("request version %d selected version %d\n", ver, selectedVersion);
         DPQoE      += ssim[selectedVersion][videoSegmentIdx[video][seg]];
+        OriginalQoE += ssim[ver][videoSegmentIdx[video][seg]];
         
         if(seek){
-            DPPower                += (SEEK_TIME * SEEK_POWER);
-            DPRequestServiceTime   += SEEK_TIME;
+            DPPower                     += (SEEK_TIME * SEEK_POWER);
+            OriginalPower               += (SEEK_TIME * SEEK_POWER);
+            DPRequestServiceTime        += SEEK_TIME;
+            OriginalRequestServiceTime  += SEEK_TIME;
         }
 
         DPPower                += ((GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME) * ACTIVE_POWER);
+        OriginalPower   += ((GetChunkCapacity(video, seg, ver) / TRANSFER_TIME) * ACTIVE_POWER);
         DPRequestServiceTime   += (GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME);
+        OriginalRequestServiceTime  += (GetChunkCapacity(video, seg, ver) / TRANSFER_TIME);
 
     }
     DPserviceCount += DPservice.size();
@@ -702,12 +702,12 @@ int main(){
             client++;
         }
         // if(sec>=5000 && sec<5050) bandwidth_allocation(sec, client);
-        if(sec>=5000 && sec<5002) bandwidth_allocation(sec, client);
+        if(sec>=5000 && sec<5005) bandwidth_allocation(sec, client);
 
         int HIdleTime        = (NUMBER_OF_DISK * LENGTH - HRequestServiceTime);
         int DPIdleTime       = (NUMBER_OF_DISK * LENGTH - DPRequestServiceTime);
 
-        int originalIdleTime = (maximumDiskNumber * LENGTH - OriginalRequestServiceTime)
+        int originalIdleTime = (maximumDiskNumber * LENGTH - OriginalRequestServiceTime);
 
         if(HIdleTime < 0) printf("H IDLE ERROR sec: %d\n", sec);
         if(DPIdleTime < 0) printf("DP IDLE ERROR sec: %d\n", sec);
@@ -720,7 +720,7 @@ int main(){
 
     HQoE      /= HserviceCount;
     DPQoE      /= DPserviceCount;
-    OriginalQoE /= serviceCount;
+    OriginalQoE /= DPserviceCount;
 
     HPower          /= END_SIMULATION;
     DPPower         /= END_SIMULATION;
