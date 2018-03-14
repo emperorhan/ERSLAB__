@@ -704,7 +704,8 @@ int main(){
             client++;
         }
         // if(sec>=5000 && sec<5050) bandwidth_allocation(sec, client);
-        if(sec>=5000 && sec<5005) bandwidth_allocation(sec, client);
+        // if(sec>=5000 && sec<5005) bandwidth_allocation(sec, client);
+        if(sec%8640 == 0 && sec != 0) bandwidth_allocation(sec, client);
 
         int HIdleTime        = (NUMBER_OF_DISK * LENGTH - HRequestServiceTime);
         int DPIdleTime       = (NUMBER_OF_DISK * LENGTH - DPRequestServiceTime);
