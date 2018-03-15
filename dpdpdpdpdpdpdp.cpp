@@ -490,10 +490,8 @@ void bandwidth_allocation(int sec, int client){
             printf("| ERROR!! disk %d over bandwidth\t\t |\n", disk);
         }
     }
-
     clock_t dpBegin, dpEnd;
     dpBegin = clock();
-
     dp = new double**[20001];
     visited = new bool**[20001];
     parent = new pair<int, int>**[20001];
@@ -560,7 +558,6 @@ void bandwidth_allocation(int sec, int client){
             delete[] parent[leng];
         }
     }
-
     dpEnd = clock();
     cout<<sec<<"s DP time: "<<(dpEnd-dpBegin)<<"ms"<<endl;
 
@@ -612,10 +609,8 @@ void bandwidth_allocation(int sec, int client){
 
     }
     DPserviceCount += DPservice.size();
-
     end = clock();
     cout<<sec<<"s bandwidth_allocation execution time: "<<(end-begin)<<"ms"<<endl;
-
 }
 
 int request_version_selector(){
@@ -664,16 +659,13 @@ int main(){
     while (scanf("%d", &poissonValue) != EOF) poisson.push_back(poissonValue);
 
     ZipfDistribution(videoPopularity, VIDEO, 1 - VIDEO_THETA);
-
     for(int video = 0; video < VIDEO; video++){
         // int rnd = Video_Length_GEN(engine);
         // rnd -= rnd%(LENGTH * SEGMENT_PARTIAL_SIZE);
         // videoLength[video] = 3600 + rnd;
         videoSegmentSize[video] = videoLength[video] / LENGTH;
         uniform_int_distribution<unsigned int> segment_generator(0, VideoNum(video));
-
         ZipfDistributionPartialSum(popularitySegment[video], videoSegmentSize[video], SEGMENT_PARTIAL_SIZE, 1 - SEG_THETA);
-
         for(int seg = 0; seg < videoSegmentSize[video]; seg++) videoSegmentIdx[video].push_back(segment_generator(engine));
     }
     
@@ -706,9 +698,7 @@ int main(){
     // 1000 24h 1.0 QoE, Power 컴파일시 6분정도 걸림
     for(int sec = 0, client = 0; sec <= END_SIMULATION; sec++){
         requestList->Delete(sec);
-
         // printf("sec: %d Request size: %d\n", sec, requestList->GetListSize());
-
         while(sec ==  poisson[client]){
             int video   = movieChoose();
             int seg     = segmentChoose(video);
@@ -722,7 +712,6 @@ int main(){
         // if(sec>=5000 && sec<5002) bandwidth_allocation(sec, client);
 
         if(sec%1800 == 0 && sec != 0) bandwidth_allocation(sec, client);
-
 
         int HIdleTime        = (NUMBER_OF_DISK * LENGTH - HRequestServiceTime);
         int DPIdleTime       = (NUMBER_OF_DISK * LENGTH - DPRequestServiceTime);

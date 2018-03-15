@@ -27,21 +27,21 @@ using namespace std;
 // #define STANDBY_POWER		0.4
 // #define TRANSFER_TIME		150
 
-// #define DISK 				2000000
-// #define SEEK_TIME			0.009
-// #define SEEK_POWER			4.1
-// #define IDLE_POWER			2.7
-// #define ACTIVE_POWER		4.1
-// #define STANDBY_POWER		0.4
-// #define TRANSFER_TIME		147
-
-#define DISK 				3000000
+#define DISK 				2000000
 #define SEEK_TIME			0.009
 #define SEEK_POWER			4.1
 #define IDLE_POWER			2.7
 #define ACTIVE_POWER		4.1
 #define STANDBY_POWER		0.4
 #define TRANSFER_TIME		147
+
+// #define DISK 				3000000
+// #define SEEK_TIME			0.009
+// #define SEEK_POWER			4.1
+// #define IDLE_POWER			2.7
+// #define ACTIVE_POWER		4.1
+// #define STANDBY_POWER		0.4
+// #define TRANSFER_TIME		147
 
 
 typedef struct Request{

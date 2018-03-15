@@ -17,8 +17,8 @@ using namespace std;
 #define LENGTH                  2           // L
 #define SEGMENT_PARTIAL_SIZE    30          // segment zipf 분포를 만들때 몇개씩 묶어서 생성할 것 인가
 
-#define SETTING_DISK            21          // 12
-#define WORKLOAD                0
+#define SETTING_DISK            31          // 12
+#define WORKLOAD                2
 #define POPOULARITY_UPSCALE     1
 
 int workload = WORKLOAD;
