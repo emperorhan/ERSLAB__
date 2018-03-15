@@ -17,7 +17,7 @@ using namespace std;
 #define LENGTH                  2           // L
 #define SEGMENT_PARTIAL_SIZE    30          // segment zipf 분포를 만들때 몇개씩 묶어서 생성할 것 인가
 
-#define SETTING_DISK            21          // 12
+#define SETTING_DISK            20          // 12
 #define WORKLOAD                0
 #define POPOULARITY_UPSCALE     1
 
@@ -27,7 +27,7 @@ int NUMBER_OF_DISK;
 double S_limit;
 
 int                                 totalVideoSize;
-double                              videoSize[VIDEO];               // 비디오별 파일 크기
+int                                 videoSize[VIDEO];               // 비디오별 파일 크기
 // int                                 videoLength[VIDEO];             // ex) 7200s
 vector<double>                      videoPopularity;                // 비디오별 확률
 int                                 videoSegmentSize[VIDEO];        // 비디오별 세그먼트 개수
@@ -44,25 +44,38 @@ double                              totalCapacity;                  // 사용될
 
 List                                *requestList;                   // request queue
 
-double                              ErsQoE;                         // ERS QoE
+double                              HQoE;                         // ERS QoE
+double                              DPQoE;                         // ERS QoE
 double                              OriginalQoE;                    // ALL QoE
-int                                 serviceCount;                   // cnt
+int                                 HserviceCount;                   // cnt
+int                                 DPserviceCount;                   // cnt
 
 int                                 maximumCapacity;                // 모든 버전을 저장할
 int                                 maximumDiskNumber;              // 모든 버전을 저장 했을 때의 디스크 개수
 
-int                                 changeCount;
+int                                 HchangeCount;
+int                                 DPchangeCount;
 
-double                              ErsPower;
+double                              HPower;
+double                              DPPower;
 double                              OriginalPower;
 
-double                              ErsRequestServiceTime;
+double                              HRequestServiceTime;
+double                              DPRequestServiceTime;
 double                              OriginalRequestServiceTime;
 
 vector<double>                      diskSegmentPopularitySum;
 
 double                              al1Upperbound;
 double                              al1Profit;
+
+double***                           dp;
+bool***                             visited;
+pair<int, int>***                   parent;
+
+
+vector<double>                      algo3QoE;
+vector<vector<pair<int, pair<int, pair<int, int> > > > >    diskRequestSegment;
 
 default_random_engine engine(static_cast<unsigned int>(time(0)));
 
@@ -370,26 +383,57 @@ string GetKey(int video, int seg){
     return to_string(video) + " " + to_string(seg);
 }
 
-void bandwidth_allocation(int sec){
-    clock_t hBegin, hEnd;
-    hBegin = clock();
-    vector<pair<int, pair<int, pair<int, pair<int, bool> > > > > service; // video, seg, ver, selected_version_index, seek
+double GetDPvalue(int diskNum, int bth, int reqSeg, int curVer){
+    if(bth > LENGTH * 10000) return INF;
+    int video = diskRequestSegment[diskNum][reqSeg].first;
+    int seg = diskRequestSegment[diskNum][reqSeg].second.first;
+    if(reqSeg == diskRequestSegment[diskNum].size() - 1) return ssim[curVer][videoSegmentIdx[video][seg]];
+    double& ret = dp[bth][reqSeg][curVer];
+    bool& isVisited = visited[bth][reqSeg][curVer];
+    if(isVisited) return ret;
+    isVisited = true;
+    int nextVideo = diskRequestSegment[diskNum][reqSeg + 1].first;
+    int nextSeg = diskRequestSegment[diskNum][reqSeg + 1].second.first;
+    int reqVer = diskRequestSegment[diskNum][reqSeg + 1].second.second.first;
+    ret = ssim[curVer][videoSegmentIdx[video][seg]];
+    double maxValue = 0;
+    for(auto ver : hotStoredVersion[nextVideo][nextSeg]){
+        if(reqVer <= ver){
+            int nextBandwidth = bth + (int)(GetServiceTime(nextVideo, nextSeg, ver) * 10000);
+            double value = GetDPvalue(diskNum, nextBandwidth, reqSeg + 1, ver);
+            if(maxValue < value){
+                maxValue = value;
+                parent[bth][reqSeg][curVer].first = ver;
+                parent[bth][reqSeg][curVer].second = nextBandwidth;
+            }
+        }
+    }
+    return ret += maxValue;
+}
+
+void bandwidth_allocation(int sec, int client){
+    clock_t begin, end;
+    begin = clock();
+    printf("%d client do it!\n", client);
+    vector<pair<int, pair<int, pair<int, pair<int, bool> > > > > DPservice; // video, seg, ver, selected_version_index, seek
+    vector<pair<int, pair<int, pair<int, pair<int, bool> > > > > Hservice; // video, seg, ver, selected_version_index, seek
     vector<pair<double, pair<int, pair<int, pair<int, int> > > > > valuableService; // value, service number, video, seg, selected version
+    diskRequestSegment.assign(NUMBER_OF_DISK, vector<pair<int, pair<int, pair<int, int> > > >());
 
     vector<bool> isfinished;
-    vector<double> usedBandwidth;
+    vector<int> usedBandwidth;
     usedBandwidth.assign(NUMBER_OF_DISK, 0);
 
     Request *pos    = requestList->GetHead()->next;
     Request *tail   = requestList->GetTail();
-    int serviceNum  = 0;
+    int DPserviceNum  = 0;
+    int HserviceNum  = 0;
     while(pos != tail){
         bool initVersionFlag    = false;
+        int initVersion         = -1;
         int video               = pos->video;
         int seg                 = GetRequestSegment(pos, sec);
         int ver                 = pos->ver;
-        int initVersion         = -1;
-
         for(auto v : hotStoredVersion[video][seg]){
             if(ver <= v){
                 if(!initVersionFlag){
@@ -397,87 +441,176 @@ void bandwidth_allocation(int sec){
                     initVersionFlag = true;
                 }
                 else{
-                    double heuristicValue   = (ssim[v][videoSegmentIdx[video][seg]] - ssim[initVersion][videoSegmentIdx[video][seg]]) / (GetServiceTime(video, seg, v) - GetServiceTime(video, seg, initVersion));
-                    valuableService.push_back({heuristicValue, {serviceNum, {video, {seg, v}}}});
+                    double heuristicValue   = (ssim[initVersion][videoSegmentIdx[video][seg]] - ssim[v][videoSegmentIdx[video][seg]]) / ((int)(GetServiceTime(video, seg, initVersion)*10000) - (int)(GetServiceTime(video, seg, v)*10000));
+                    valuableService.push_back({heuristicValue, {HserviceNum, {video, {seg, v}}}});
                 }
             }
         }
+        Hservice.push_back({video, {seg, {ver, {initVersion, pos->seek}}}});
+        usedBandwidth[segment_allocation_disk[video][seg]] += GetServiceTime(video, seg, initVersion) * 10000;
 
-        service.push_back({video, {seg, {ver, {initVersion, pos->seek}}}});
-        serviceNum++;
-        usedBandwidth[segment_allocation_disk[video][seg]] += GetServiceTime(video, seg, initVersion);
+        diskRequestSegment[segment_allocation_disk[video][seg]].push_back({video, {seg, {ver, DPserviceNum}}});
+        DPservice.push_back({video, {seg, {ver, {-1, pos->seek}}}});
+
         pos->seek = !pos->seek;
         pos = pos->next;
+        DPserviceNum++;
+        HserviceNum++;
     }
 
-    // for(int disk = 0; disk < NUMBER_OF_DISK; disk++){
-    //  if(usedBandwidth[disk] > LENGTH){
-    //      printf("| disk %d over bandwidth\t\t |\n", disk);
-    //  }
-    // }
-
-    isfinished.assign(service.size(), 0);
+    isfinished.assign(Hservice.size(), 0);
     sort(valuableService.begin(), valuableService.end());
     int finishedCount = 0;
 
     for(auto valServ : valuableService){
-        if(finishedCount == service.size()) break;
-        serviceNum          = valServ.second.first;
+        if(finishedCount == Hservice.size()) break;
+        HserviceNum         = valServ.second.first;
         int video           = valServ.second.second.first;
         int seg             = valServ.second.second.second.first;
         int selectedVersion = valServ.second.second.second.second;
-        int prevVersion     = service[serviceNum].second.second.second.first;
+        int prevVersion     = Hservice[HserviceNum].second.second.second.first;
 
-        if(isfinished[serviceNum]) continue;
+        if(isfinished[HserviceNum]) continue;
 
-        if((usedBandwidth[segment_allocation_disk[video][seg]] <= LENGTH)){
-            isfinished[serviceNum] = true;
+        if((usedBandwidth[segment_allocation_disk[video][seg]] <= LENGTH * 10000)){
+            isfinished[HserviceNum] = true;
             finishedCount++;
             continue;
         }
-        if(GetServiceTime(video, seg, selectedVersion) < GetServiceTime(video, seg, prevVersion)){
-            service[serviceNum].second.second.second.first = selectedVersion;
-            usedBandwidth[segment_allocation_disk[video][seg]] += GetServiceTime(video, seg, selectedVersion) - GetServiceTime(video, seg, prevVersion);
-            changeCount++;
+        if((int)(GetServiceTime(video, seg, selectedVersion)*10000) < (int)(GetServiceTime(video, seg, prevVersion)*10000)){
+            Hservice[HserviceNum].second.second.second.first = selectedVersion;
+            usedBandwidth[segment_allocation_disk[video][seg]] += (int)(GetServiceTime(video, seg, selectedVersion)*10000) - (int)(GetServiceTime(video, seg, prevVersion)*10000);
+            HchangeCount++;
         }
     }
 
+
     for(int disk = 0; disk < NUMBER_OF_DISK; disk++){
-        if(usedBandwidth[disk] > LENGTH){
+        if(usedBandwidth[disk] > LENGTH*10000){
             printf("| ERROR!! disk %d over bandwidth\t\t |\n", disk);
         }
     }
+    clock_t dpBegin, dpEnd;
+    dpBegin = clock();
+    dp = new double**[20001];
+    visited = new bool**[20001];
+    parent = new pair<int, int>**[20001];
+    for(int d = 0; d < NUMBER_OF_DISK; d++){
+        for(int leng = 0; leng <= 20000; leng++) {
+            dp[leng] = new double *[diskRequestSegment[d].size()];
+            visited[leng] = new bool *[diskRequestSegment[d].size()];
+            parent[leng] = new pair<int, int> *[diskRequestSegment[d].size()];
+            for (int reqSeg = 0; reqSeg < diskRequestSegment[d].size(); reqSeg++) {
+                dp[leng][reqSeg] = new double[VERSION_SIZE];
+                visited[leng][reqSeg] = new bool[VERSION_SIZE];
+                parent[leng][reqSeg] = new pair<int, int>[VERSION_SIZE];
+                for(int v = 0; v < VERSION_SIZE; v++){
+                    visited[leng][reqSeg][v] = 0;
+                    parent[leng][reqSeg][v].first = -1;
+                }
+            }
+        }
 
-    ErsRequestServiceTime       = 0;
+        double maxVal = 0;
+        int curVer;
+        int curBandwidth;
+        int video = diskRequestSegment[d][0].first;
+        int seg = diskRequestSegment[d][0].second.first;
+        int reqVer = diskRequestSegment[d][0].second.second.first;
+        for(auto v : hotStoredVersion[video][seg]){
+            if(reqVer <= v){
+                int bth = (int)(GetServiceTime(video, seg, v) * 10000);
+                double dpVal = GetDPvalue(d, bth, 0, v);
+                if(dpVal < 0) printf("???\n");
+                if(maxVal < dpVal){
+                    maxVal = dpVal;
+                    curVer = v;
+                    curBandwidth = bth;
+                }
+            }
+        }
+        algo3QoE[d] += maxVal;
+
+        DPserviceNum = diskRequestSegment[d][0].second.second.second;
+        DPservice[DPserviceNum].second.second.second.first = curVer;
+
+        int prevVer, prevBandwidth;
+        for(int reqSeg = 0; reqSeg < diskRequestSegment[d].size(); reqSeg++){
+            prevVer = curVer;
+            prevBandwidth = curBandwidth;
+            DPserviceNum = diskRequestSegment[d][reqSeg].second.second.second;
+            DPservice[DPserviceNum].second.second.second.first = curVer;
+            if(curVer == -1){
+                printf("disk %d bandwidth err --- reqSeg: %d\n", d, reqSeg);
+                exit(0);
+            }
+            curVer = parent[prevBandwidth][reqSeg][prevVer].first;
+            curBandwidth = parent[prevBandwidth][reqSeg][prevVer].second;
+        }
+        for(int leng = 0; leng <= 20000; leng++) {
+            for (int reqSeg = 0; reqSeg < diskRequestSegment[d].size(); reqSeg++) {
+                delete[] dp[leng][reqSeg];
+                delete[] visited[leng][reqSeg];
+                delete[] parent[leng][reqSeg];
+            }
+            delete[] dp[leng];
+            delete[] visited[leng];
+            delete[] parent[leng];
+        }
+    }
+    dpEnd = clock();
+    cout<<sec<<"s DP time: "<<(dpEnd-dpBegin)<<"ms"<<endl;
+
+    HRequestServiceTime       = 0;
+    DPRequestServiceTime         = 0;
     OriginalRequestServiceTime  = 0;
-
-    for(auto sv : service){
+    // printf("client: %d service start\n", client);
+    for(auto sv : Hservice){
         int video               = sv.first;
         int seg                 = sv.second.first;
         int ver                 = sv.second.second.first;
         int seek                = sv.second.second.second.second;
         int selectedVersion     = sv.second.second.second.first;
 
-        ErsQoE      += ssim[selectedVersion][videoSegmentIdx[video][seg]];
-        OriginalQoE += ssim[ver][videoSegmentIdx[video][seg]];
+        HQoE      += ssim[selectedVersion][videoSegmentIdx[video][seg]];
 
         if(seek){
-            ErsPower        += (SEEK_TIME * SEEK_POWER);
-            OriginalPower   += (SEEK_TIME * SEEK_POWER);
-            ErsRequestServiceTime       += SEEK_TIME;
+            HPower                  += (SEEK_TIME * SEEK_POWER);
+            HRequestServiceTime     += SEEK_TIME;
+        }
+
+        HPower        += ((GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME) * ACTIVE_POWER);
+
+        HRequestServiceTime       += (GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME);
+    }
+    HserviceCount += Hservice.size();
+
+    for(auto sv : DPservice){
+        int video               = sv.first;
+        int seg                 = sv.second.first;
+        int ver                 = sv.second.second.first;
+        int seek                = sv.second.second.second.second;
+        int selectedVersion     = sv.second.second.second.first;
+        // printf("request version %d selected version %d\n", ver, selectedVersion);
+        DPQoE      += ssim[selectedVersion][videoSegmentIdx[video][seg]];
+        OriginalQoE += ssim[ver][videoSegmentIdx[video][seg]];
+        
+        if(seek){
+            DPPower                     += (SEEK_TIME * SEEK_POWER);
+            OriginalPower               += (SEEK_TIME * SEEK_POWER);
+            DPRequestServiceTime        += SEEK_TIME;
             OriginalRequestServiceTime  += SEEK_TIME;
         }
 
-        ErsPower        += ((GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME) * ACTIVE_POWER);
+        DPPower                += ((GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME) * ACTIVE_POWER);
         OriginalPower   += ((GetChunkCapacity(video, seg, ver) / TRANSFER_TIME) * ACTIVE_POWER);
-
-        ErsRequestServiceTime       += (GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME);
+        DPRequestServiceTime   += (GetChunkCapacity(video, seg, selectedVersion) / TRANSFER_TIME);
         OriginalRequestServiceTime  += (GetChunkCapacity(video, seg, ver) / TRANSFER_TIME);
-    }
-    serviceCount += service.size();
 
-    hEnd = clock();
-    if(sec && sec%3600 == 0) cout<<sec<<"s BAA execution time: "<<(hEnd-hBegin)<<"ms"<<endl;
+    }
+    DPserviceCount += DPservice.size();
+    end = clock();
+    cout<<sec<<"s bandwidth_allocation execution time: "<<(end-begin)<<"ms"<<endl;
 }
 
 int request_version_selector(){
@@ -518,8 +651,9 @@ string GetOutputFileName(){
 int main(){
     clock_t begin, end;
     begin = clock();
+    // freopen(GetOutputFileName().c_str(), "w+", stdout);
     freopen(GetInputFileName().c_str(), "r", stdin);
-//    freopen("ttteeesssttt.txt", "w+", stdout);
+    // freopen("dptest.txt", "w+", stdout);
 
     int poissonValue;
     while (scanf("%d", &poissonValue) != EOF) poisson.push_back(poissonValue);
@@ -534,7 +668,7 @@ int main(){
         ZipfDistributionPartialSum(popularitySegment[video], videoSegmentSize[video], SEGMENT_PARTIAL_SIZE, 1 - SEG_THETA);
         for(int seg = 0; seg < videoSegmentSize[video]; seg++) videoSegmentIdx[video].push_back(segment_generator(engine));
     }
-
+    
     InitVideoSize();
     InitPopularity();
 
@@ -543,8 +677,6 @@ int main(){
     InitSsim();     //      ssim variation range¸¦ 1.0 ~ 5.0À¸·Î º¯È­½ÃÅ²´Ù
 
     GetMaximumDiskNumber();
-
-    freopen(GetOutputFileName().c_str(), "w+", stdout);
 
 
     // minimumDiskServiceTime();
@@ -557,15 +689,16 @@ int main(){
     printf("Disk allocated segment total cap is ");
     printCapacity(totalCapacity);
 
-    // printf("%d\n", maximumDiskNumber);
     // print_disk_seg();
 
     requestList = new List;
-    int algo3cnt = 0;
+    algo3QoE.assign(NUMBER_OF_DISK, double());
+
     // 1000 24h 1.0 service 벡터에 푸쉬만 하는데 컴파일 178초 걸림
     // 1000 24h 1.0 QoE, Power 컴파일시 6분정도 걸림
     for(int sec = 0, client = 0; sec <= END_SIMULATION; sec++){
         requestList->Delete(sec);
+        // printf("sec: %d Request size: %d\n", sec, requestList->GetListSize());
         while(sec ==  poisson[client]){
             int video   = movieChoose();
             int seg     = segmentChoose(video);
@@ -575,39 +708,53 @@ int main(){
 
             client++;
         }
-        if(sec >= 3600){
-            bandwidth_allocation(sec);
-            algo3cnt++;
-        }
+        // if(sec>=5000 && sec<5050) bandwidth_allocation(sec, client);
+        // if(sec>=5000 && sec<5002) bandwidth_allocation(sec, client);
 
-        int ersIdleTime      = (NUMBER_OF_DISK * LENGTH - ErsRequestServiceTime);
+        if(sec%1800 == 0 && sec != 0) bandwidth_allocation(sec, client);
+
+        int HIdleTime        = (NUMBER_OF_DISK * LENGTH - HRequestServiceTime);
+        int DPIdleTime       = (NUMBER_OF_DISK * LENGTH - DPRequestServiceTime);
+
         int originalIdleTime = (maximumDiskNumber * LENGTH - OriginalRequestServiceTime);
 
-        if(ersIdleTime < 0) printf("ers IDLE ERROR sec: %d\n", sec);
+        if(HIdleTime < 0) printf("H IDLE ERROR sec: %d\n", sec);
+        if(DPIdleTime < 0) printf("DP IDLE ERROR sec: %d\n", sec);
         if(originalIdleTime < 0) printf("ori IDLE ERROR sec: %d\n", sec);
 
-        ErsPower        += ersIdleTime * IDLE_POWER;
+        HPower          += HIdleTime * IDLE_POWER;
+        DPPower         += DPIdleTime * IDLE_POWER;
         OriginalPower   += originalIdleTime * IDLE_POWER;
     }
 
-    ErsQoE      /= serviceCount;
-    OriginalQoE /= serviceCount;
+    HQoE      /= HserviceCount;
+    DPQoE      /= DPserviceCount;
+    OriginalQoE /= DPserviceCount;
 
-    ErsPower        /= algo3cnt;
-    OriginalPower   /= algo3cnt;
+    HPower          /= END_SIMULATION;
+    DPPower         /= END_SIMULATION;
+    OriginalPower   /= END_SIMULATION;
 
-    ErsPower += (maximumDiskNumber - NUMBER_OF_DISK) * STANDBY_POWER;
+    HPower += (maximumDiskNumber - NUMBER_OF_DISK) * STANDBY_POWER;
+    DPPower += (maximumDiskNumber - NUMBER_OF_DISK) * STANDBY_POWER;
 
-    double maxPop = 0;
-    double minPop = 100;
+    double H_QoE_ratio = HQoE/OriginalQoE*100;
+    double H_Power_ratio = HPower/OriginalPower*100;
 
-    for(auto p : diskSegmentPopularitySum){
-        if(maxPop < p) maxPop = p;
-        if(minPop > p) minPop = p;
-    }
+    double DP_QoE_ratio = DPQoE/OriginalQoE*100;
+    double DP_Power_ratio = DPPower/OriginalPower*100;
+  
+    printf("H\tQoE ratio: %lf%%, Power ratio: %lf%%\n", H_QoE_ratio, H_Power_ratio);
+    printf("DP\tQoE ratio: %lf%%, Power ratio: %lf%%\n", DP_QoE_ratio, DP_Power_ratio);
 
-    printf("%3.1d\n%lf%%\n%lf\n%lf%%\n%lfW\n%lfW\n\n%lf\n%lf\n%lf%%\n\n%d\n\n%lf%%\n", NUMBER_OF_DISK, ErsQoE/OriginalQoE*100, ErsPower, ErsPower/OriginalPower*100, ErsPower, OriginalPower, al1Profit, al1Upperbound, al1Profit/al1Upperbound*100, changeCount, maxPop/minPop * 100);
+    printf("QoE: %lf%%, Power: %lf%%\n", H_QoE_ratio/DP_QoE_ratio*100, H_Power_ratio/DP_Power_ratio*100);
+    // double maxPop = 0;
+    // double minPop = 100;
 
+    // for(auto p : diskSegmentPopularitySum){
+    //     if(maxPop < p) maxPop = p;
+    //     if(minPop > p) minPop = p;
+    // }
 
 //    printf("Maximum Disk %3.1d\tERS Disk %3.1d\n", maximumDiskNumber, NUMBER_OF_DISK);
 //    printf("\nTSA ALL QoE \t\t%lf\nERS QoE \t\t%lf\n", OriginalQoE, ErsQoE);
@@ -620,7 +767,7 @@ int main(){
 
     end = clock();
 
-    cout<<"\n\n\nMaximum Disk: "<<maximumDiskNumber<<"\nexecution time : "<<(end-begin)<<"ms"<<endl;
+    cout<<"\n\n\nMaximum Disk: "<<maximumDiskNumber<<"\nexcution time : "<<((end-begin)/CLOCKS_PER_SEC)<<"sec"<<endl;
 
 //    printf("Algorithm 1 Profit: %lf, Upper bound: %lf\n", al1Profit, al1Upperbound);
 //
